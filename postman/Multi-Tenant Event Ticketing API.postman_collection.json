@@ -1,0 +1,554 @@
+{
+  "info": {
+    "name": "Multi-Tenant Event Ticketing API",
+    "_postman_id": "c2c991d4-bb1f-4f99-976b-3ac9c325fe35",
+    "description": "Production REST API for Multi-Tenant Event & Ticket Reservation System with PostgreSQL row-locking concurrency, 10-minute holds, and BullMQ background workers.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:5000/api", "type": "string" },
+    { "key": "authToken", "value": "", "type": "string" },
+    { "key": "adminToken", "value": "", "type": "string" },
+    { "key": "organizer1Token", "value": "", "type": "string" },
+    { "key": "organizer2Token", "value": "", "type": "string" },
+    { "key": "attendee1Token", "value": "", "type": "string" },
+    { "key": "attendee2Token", "value": "", "type": "string" },
+    { "key": "eventId", "value": "", "type": "string" },
+    { "key": "ticketTierId", "value": "", "type": "string" },
+    { "key": "reservationId", "value": "", "type": "string" },
+    { "key": "orderId", "value": "", "type": "string" },
+    { "key": "transactionId", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "1. Health & System",
+      "item": [
+        {
+          "name": "Get System Health",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/health",
+            "description": "Checks health of REST API, PostgreSQL database connectivity, and Redis queue status."
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Authentication",
+      "item": [
+        {
+          "name": "Login as Admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.data?.token) {",
+                  "  pm.collectionVariables.set('adminToken', res.data.token);",
+                  "  pm.collectionVariables.set('authToken', res.data.token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@example.com\",\n  \"password\": \"Password123!\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/login"
+          }
+        },
+        {
+          "name": "Login as Organizer 1 (Apex)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.data?.token) {",
+                  "  pm.collectionVariables.set('organizer1Token', res.data.token);",
+                  "  pm.collectionVariables.set('authToken', res.data.token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"organizer1@example.com\",\n  \"password\": \"Password123!\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/login"
+          }
+        },
+        {
+          "name": "Login as Organizer 2 (Pulse)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.data?.token) {",
+                  "  pm.collectionVariables.set('organizer2Token', res.data.token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"organizer2@example.com\",\n  \"password\": \"Password123!\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/login"
+          }
+        },
+        {
+          "name": "Login as Attendee 1 (Alice)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.data?.token) {",
+                  "  pm.collectionVariables.set('attendee1Token', res.data.token);",
+                  "  pm.collectionVariables.set('authToken', res.data.token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"attendee1@example.com\",\n  \"password\": \"Password123!\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/login"
+          }
+        },
+        {
+          "name": "Register New User",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"David Test\",\n  \"email\": \"david.test@example.com\",\n  \"password\": \"Password123!\",\n  \"role\": \"ATTENDEE\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/register"
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Public Events Discovery",
+      "item": [
+        {
+          "name": "Get Public Events (Cached in Redis)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.data && res.data.length > 0) {",
+                  "  pm.collectionVariables.set('eventId', res.data[0].id);",
+                  "  if (res.data[0].ticketTiers.length > 0) {",
+                  "    pm.collectionVariables.set('ticketTierId', res.data[0].ticketTiers[0].id);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/events?category=Technology&location=San Francisco",
+              "host": ["{{baseUrl}}"],
+              "path": ["events"],
+              "query": [
+                { "key": "category", "value": "Technology" },
+                { "key": "location", "value": "San Francisco" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Event Details by ID",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/events/{{eventId}}"
+          }
+        },
+        {
+          "name": "Get Live Event Ticket Availability",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/events/{{eventId}}/availability"
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Attendee Reservation & Holds",
+      "item": [
+        {
+          "name": "Create 10-Minute Reservation Hold (SELECT FOR UPDATE)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.data?.reservationId) {",
+                  "  pm.collectionVariables.set('reservationId', res.data.reservationId);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{attendee1Token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"ticketTierId\": \"{{ticketTierId}}\",\n      \"quantity\": 2\n    }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/events/{{eventId}}/reservations"
+          }
+        },
+        {
+          "name": "Get Reservation by ID (With Live Countdown)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{attendee1Token}}" }],
+            "url": "{{baseUrl}}/reservations/{{reservationId}}"
+          }
+        },
+        {
+          "name": "Get My Active Reservations",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{attendee1Token}}" }],
+            "url": "{{baseUrl}}/reservations/me"
+          }
+        },
+        {
+          "name": "Cancel Reservation Hold (Releases Tickets)",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{attendee1Token}}" }],
+            "url": "{{baseUrl}}/reservations/{{reservationId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Checkout & Asynchronous Payments",
+      "item": [
+        {
+          "name": "Checkout Reservation -> Create PENDING Order",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.data?.id) {",
+                  "  pm.collectionVariables.set('orderId', res.data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{attendee1Token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reservationId\": \"{{reservationId}}\"\n}"
+            },
+            "url": "{{baseUrl}}/orders"
+          }
+        },
+        {
+          "name": "Process Payment (Enqueues BullMQ Worker)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.data?.transactionId) {",
+                  "  pm.collectionVariables.set('transactionId', res.data.transactionId);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{attendee1Token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": \"{{orderId}}\",\n  \"simulateFailure\": false,\n  \"paymentMethod\": \"visa_4242\"\n}"
+            },
+            "url": "{{baseUrl}}/payments/process"
+          }
+        },
+        {
+          "name": "Poll Payment Status",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{attendee1Token}}" }],
+            "url": "{{baseUrl}}/payments/{{transactionId}}"
+          }
+        },
+        {
+          "name": "Get My Tickets (Issued Passes)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{attendee1Token}}" }],
+            "url": "{{baseUrl}}/tickets/me"
+          }
+        },
+        {
+          "name": "Get My Orders",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{attendee1Token}}" }],
+            "url": "{{baseUrl}}/orders/me"
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Organizer Tenant Operations",
+      "item": [
+        {
+          "name": "Get My Tenant Events",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{organizer1Token}}" }],
+            "url": "{{baseUrl}}/organizer/events"
+          }
+        },
+        {
+          "name": "Create Event with Ticket Tiers",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{organizer1Token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Cloud AI Conclave 2026\",\n  \"description\": \"Advanced generative AI and cloud infrastructure summit.\",\n  \"venue\": \"Palace of Fine Arts\",\n  \"location\": \"San Francisco, CA\",\n  \"category\": \"Technology\",\n  \"eventDate\": \"2026-11-25T09:00:00Z\",\n  \"salesStartDate\": \"2026-01-01T00:00:00Z\",\n  \"salesCutoffDate\": \"2026-11-24T23:59:59Z\",\n  \"ticketTiers\": [\n    {\n      \"name\": \"Early Bird\",\n      \"price\": 149.00,\n      \"quantity\": 50\n    },\n    {\n      \"name\": \"VIP Pass\",\n      \"price\": 399.00,\n      \"quantity\": 20\n    }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/organizer/events"
+          }
+        },
+        {
+          "name": "Update Event",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{organizer1Token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description\": \"Updated event agenda with international keynote speakers.\"\n}"
+            },
+            "url": "{{baseUrl}}/organizer/events/{{eventId}}"
+          }
+        },
+        {
+          "name": "Add Ticket Tier to Event",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{organizer1Token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Late Registration Pass\",\n  \"price\": 229.00,\n  \"quantity\": 30\n}"
+            },
+            "url": "{{baseUrl}}/organizer/events/{{eventId}}/tiers"
+          }
+        },
+        {
+          "name": "Get Tenant Orders",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{organizer1Token}}" }],
+            "url": "{{baseUrl}}/organizer/orders"
+          }
+        },
+        {
+          "name": "Get Organizer Analytics (Conversion & Revenue)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{organizer1Token}}" }],
+            "url": "{{baseUrl}}/organizer/analytics"
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Critical Edge Cases & Security Invariants",
+      "item": [
+        {
+          "name": "Edge Case 1: Oversell Request (Exceeding Available)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{attendee1Token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"ticketTierId\": \"{{ticketTierId}}\",\n      \"quantity\": 9999\n    }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/events/{{eventId}}/reservations",
+            "description": "Expected: 409 Conflict with code INSUFFICIENT_TICKETS."
+          }
+        },
+        {
+          "name": "Edge Case 2: Tenant Violation (Org 2 modifies Org 1 Event)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{organizer2Token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Malicious Unauthorized Rename\"\n}"
+            },
+            "url": "{{baseUrl}}/organizer/events/{{eventId}}",
+            "description": "Expected: 403 Forbidden with TENANT_VIOLATION."
+          }
+        },
+        {
+          "name": "Edge Case 3: Tenant Violation (Org 2 queries Org 1 Analytics)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{organizer2Token}}" }],
+            "url": "{{baseUrl}}/organizer/events/{{eventId}}/analytics",
+            "description": "Expected: 403 Forbidden with TENANT_VIOLATION."
+          }
+        },
+        {
+          "name": "Edge Case 4: Cross-User Order Access (User B views User A Order)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{attendee2Token}}" }],
+            "url": "{{baseUrl}}/orders/{{orderId}}",
+            "description": "Expected: 403 Forbidden."
+          }
+        },
+        {
+          "name": "Edge Case 5: Duplicate Payment Request",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{attendee1Token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": \"{{orderId}}\"\n}"
+            },
+            "url": "{{baseUrl}}/payments/process",
+            "description": "Expected: Safe idempotent response or 400 Bad Request."
+          }
+        },
+        {
+          "name": "Edge Case 6: Simulate Failed Payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{attendee1Token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": \"{{orderId}}\",\n  \"simulateFailure\": true\n}"
+            },
+            "url": "{{baseUrl}}/payments/process",
+            "description": "Simulates decline. Background worker will mark transaction FAILED and release held inventory."
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. Admin Governance & Platform Operations",
+      "item": [
+        {
+          "name": "Get All Users",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseUrl}}/admin/users"
+          }
+        },
+        {
+          "name": "Get All Organizers",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseUrl}}/admin/organizers"
+          }
+        },
+        {
+          "name": "Suspend Organizer Tenant",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"SUSPENDED\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/organizers/{{eventId}}/status"
+          }
+        },
+        {
+          "name": "Get Platform-Wide Analytics",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseUrl}}/admin/analytics"
+          }
+        }
+      ]
+    }
+  ]
+}
