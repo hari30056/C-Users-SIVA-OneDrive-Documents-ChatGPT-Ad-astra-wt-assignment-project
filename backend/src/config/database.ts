@@ -8,10 +8,15 @@ export let isDbConnected = false;
 
 export const initDatabase = async (): Promise<boolean> => {
   try {
+    const isRemoteDb =
+      !config.databaseUrl.includes('localhost') &&
+      !config.databaseUrl.includes('127.0.0.1');
+
     const pool = new Pool({
       connectionString: config.databaseUrl,
-      connectionTimeoutMillis: 2000,
-      max: 20,
+      connectionTimeoutMillis: 5000,
+      max: 10,
+      ssl: isRemoteDb ? { rejectUnauthorized: false } : undefined,
     });
 
     const client = await pool.connect();
@@ -20,7 +25,8 @@ export const initDatabase = async (): Promise<boolean> => {
 
     pgPool = pool;
     isDbConnected = true;
-    console.log('✅ Connected to PostgreSQL at', config.databaseUrl);
+    const safeDbUrl = config.databaseUrl.replace(/:[^:@]*@/, ':****@');
+    console.log('✅ Connected to PostgreSQL at', safeDbUrl);
 
     // Also connect prisma
     await prisma.$connect();

@@ -7,6 +7,7 @@
     "frontend"
   ],
   "scripts": {
+    "build": "prisma generate --schema=backend/prisma/schema.prisma && npm --prefix frontend run build",
     "backend:dev": "npm --prefix backend run dev",
     "backend:build": "npm --prefix backend run build",
     "backend:start": "npm --prefix backend run start",
@@ -14,5 +15,11 @@
     "frontend:build": "npm --prefix frontend run build",
     "seed": "npm --prefix backend run seed",
     "test": "npm --prefix backend run test"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.20.0"
+  },
+  "devDependencies": {
+    "prisma": "^5.20.0"
   }
 }
