@@ -2,6 +2,10 @@
 
 A production-quality full-stack web platform built for high-concurrency event ticketing where multiple organizers operate as isolated tenants and attendees can reserve and purchase tickets safely under concurrent booking conditions.
 
+## Live Demo
+
+Open the live application [https://multi-tenant-event-tkt-reservation.vercel.app/](https://multi-tenant-event-tkt-reservation.vercel.app/)
+
 ---
 
 ## 🌟 Key Features
